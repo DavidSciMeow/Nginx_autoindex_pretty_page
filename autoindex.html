@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Browser</title>
+    <!-- 引入 Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            /* 禁止上下滚动 */
+        }
+
+        .file-list {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 33.333%;
+            /* 默认宽度 */
+            max-height: 100%;
+            overflow-y: auto;
+            transition: transform 0.3s ease-in-out;
+            /* 添加宽度过渡效果 */
+            background-color: #f8f9fa;
+            /* 背景色 */
+        }
+
+        .file-list.collapsed {
+            transform: translateX(-100%);
+            /* 折叠时移出屏幕 */
+        }
+
+        .preview-area {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            /* 默认占满整个宽度 */
+            border-left: 1px solid #ddd;
+            overflow-y: auto;
+            transition: left 0.3s ease-in-out;
+            /* 添加左侧位置过渡效果 */
+        }
+
+        .preview-area.with-sidebar {
+            left: 33.333%;
+            /* 当左侧目录展开时，右侧预览区域调整 */
+        }
+
+        #previewContainer img {
+            object-fit: contain;
+            /* 确保图片按比例缩放 */
+            display: block;
+            margin: auto;
+            /* 居中显示 */
+        }
+
+        .toggle-tab {
+            position: absolute;
+            top: 30px;
+            /* 将按钮移动到顶部 */
+            left: 0;
+            /* 吸附在左侧 */
+            width: 60px;
+            height: 60px;
+            /* 调整按钮大小 */
+            background-color: rgba(255, 255, 255, 0.5);
+            /* 半透明背景 */
+            backdrop-filter: blur(20px);
+            /* 毛玻璃效果 */
+            color: red;
+            font-weight: bold;
+            font-size: large;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 0 5px 5px 0;
+            /* 圆角调整 */
+            z-index: 1000;
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            /* 添加边框 */
+            transition: left 0.3s ease-in-out;
+            /* 平滑过渡效果 */
+        }
+
+        #previewContainer {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            /* 防止内容溢出 */
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid" style="margin-top: 20px;">
+        <!-- 左侧目录 -->
+        <div id="fileListContainer" class="file-list bg-light p-3">
+            <button id="backButton" class="btn btn-secondary mb-3">返回上一级</button>
+            <ul id="fileList" class="list-group">
+                <!-- 动态插入文件列表 -->
+            </ul>
+        </div>
+        <!-- 右侧预览 -->
+        <div id="previewArea" class="preview-area p-3 with-sidebar">
+            <div id="previewContainer">
+                <p>请选择一个文件进行预览。</p>
+            </div>
+        </div>
+        <!-- 折叠/展开按钮 -->
+        <div id="toggleTab" class="toggle-tab">&gt;</div>
+    </div>
+
+    <!-- 引入 Bootstrap JS 和依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        const fileListContainer = document.getElementById('fileListContainer');
+        const previewArea = document.getElementById('previewArea');
+        const toggleTab = document.getElementById('toggleTab');
+        const fileList = document.getElementById('fileList');
+        const previewContainer = document.getElementById('previewContainer');
+        const backButton = document.getElementById('backButton');
+
+        // 动态解析 autoindex 返回的文件列表
+        const preElement = document.querySelector('pre'); // 获取 autoindex 的 <pre> 标签
+        const preHTML = document.querySelector('html'); // 获取 autoindex 的 <html> 标签
+        const files = [];
+        let readmeFile = null;
+        // 删除h1和hr.
+        if (preHTML) {
+            preHTML.querySelector("h1").remove();
+            preHTML.querySelector("hr").remove();
+            preHTML.querySelector("hr").remove();
+        }
+
+        if (preElement) {
+            // 解析 <pre> 元素中的文件列表
+            const links = preElement.querySelectorAll('a'); // 获取所有 <a> 标签
+            links.forEach(link => {
+                const name = link.textContent.trim(); // 文件名
+                const path = link.getAttribute('href'); // 文件路径
+                if (name !== '../') { // 排除返回上级目录的链接
+                    const file = { name, path, type: getFileType(name, link) };
+                    files.push(file);
+                    // 检查是否是 ReadMe 文件
+                    if (/^readme\.md$/i.test(name)) {
+                        readmeFile = file;
+                    }
+                }
+            });
+            // 删除原始 autoindex 的 <pre> 内容
+            preElement.remove();
+        }
+
+        // 文件类型判断函数
+        function getFileType(name, link) {
+            if (link.getAttribute('href').endsWith('/')) return 'folder'; // 判断是否为文件夹
+            const ext = name.split('.').pop().toLowerCase();
+            if (['md', 'markdown'].includes(ext)) return 'markdown';
+            if (['pdf'].includes(ext)) return 'pdf';
+            if (['png', 'jpg', 'jpeg', 'gif'].includes(ext)) return 'image';
+            if (['js', 'html', 'css'].includes(ext)) return 'code';
+            return 'unknown';
+        }
+
+        // 动态生成文件列表
+        files.forEach(file => {
+            const listItem = document.createElement('li');
+            listItem.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+            listItem.textContent = file.name;
+            listItem.style.cursor = 'pointer';
+
+            if (file.type === 'folder') {
+                listItem.onclick = () => navigateToFolder(file.path);
+            } else {
+                listItem.onclick = () => previewFile(file);
+
+                // 获取文件大小和创建时间
+                fetch(file.path, { method: 'HEAD' })
+                    .then(response => {
+                        const size = response.headers.get('content-length');
+                        const lastModified = response.headers.get('last-modified');
+                        if (size) {
+                            const sizeElement = document.createElement('span');
+                            sizeElement.className = 'badge bg-primary rounded-pill';
+                            sizeElement.textContent = formatFileSize(size);
+                            sizeElement.title = `大小: ${size} 字节\n创建时间: ${lastModified || '未知'}`;
+                            listItem.appendChild(sizeElement);
+                        }
+                    });
+            }
+
+            fileList.appendChild(listItem);
+        });
+
+        // 格式化文件大小
+        function formatFileSize(size) {
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let index = 0;
+            let fileSize = parseInt(size, 10);
+            while (fileSize >= 1024 && index < units.length - 1) {
+                fileSize /= 1024;
+                index++;
+            }
+            return `${fileSize.toFixed(2)} ${units[index]}`;
+        }
+
+        // 文件夹导航逻辑
+        function navigateToFolder(path) {
+            window.location.href = path; // 导航到子目录
+        }
+
+        // 文件预览逻辑
+        function previewFile(file, collapseSidebar = true) {
+            previewContainer.innerHTML = ""; // 清空预览区域
+            if (file.type === "markdown") {
+                fetch(file.path)
+                    .then(response => response.text())
+                    .then(content => {
+                        const markdownContainer = document.createElement("div");
+                        markdownContainer.className = "markdown-body";
+                        markdownContainer.innerHTML = marked.parse(content);
+                        previewContainer.appendChild(markdownContainer);
+                    });
+            } else if (file.type === "pdf") {
+                const iframe = document.createElement("iframe");
+                iframe.src = file.path;
+                iframe.style.width = "100%"; // 设置宽度为 100%
+                iframe.style.height = "100%"; // 设置高度为 100%
+                previewContainer.appendChild(iframe);
+            } else if (file.type === "image") {
+                const img = document.createElement("div");
+                img.style.backgroundImage = 'url(' + file.path + ')'; // 设置背景图片
+                img.style.backgroundSize = "contain"; // 确保图片按比例缩放并完全显示
+                img.style.backgroundPosition = "center"; // 居中显示背景图片
+                img.style.backgroundRepeat = "no-repeat"; // 防止背景图片重复
+                img.style.width = "100%"; 
+                img.style.height = "100%"; 
+
+                // 添加点击事件
+                img.onclick = () => {
+                    // 方式 1: 打开新页面
+                    // window.open(file.path, '_blank');
+
+                    // 或者方式 2: 触发下载
+                    const a = document.createElement('a');
+                    a.href = file.path;
+                    a.download = file.name; // 设置下载文件名
+                    a.click();
+                };
+
+                previewContainer.appendChild(img);
+            } else {
+                previewContainer.innerHTML = `<h1>无法预览此文件类型。</h1><br/><a href="${file.path}" class="btn btn-primary" download>下载文件</a>`;
+                collapseSidebar = false; // 无法预览时不折叠左侧栏
+            }
+
+            // 如果是 ReadMe 文件，始终保持左侧栏展开
+            if (file === readmeFile) {
+                collapseSidebar = false;
+            }
+
+            if (collapseSidebar) {
+                // 折叠左侧目录
+                fileListContainer.classList.add('collapsed');
+                previewArea.classList.remove('with-sidebar');
+                toggleTab.innerHTML = '&gt;';
+                toggleTab.style.transform = 'translate(0, -50%)'; // 移动到右侧
+                updateToggleTabPosition(); // 更新按钮位置
+            } else {
+                // 展开左侧目录
+                fileListContainer.classList.remove('collapsed');
+                previewArea.classList.add('with-sidebar');
+                toggleTab.innerHTML = '&lt;';
+                updateToggleTabPosition(); // 更新按钮位置
+            }
+        }
+
+        // 初始化按钮位置
+        function updateToggleTabPosition() {
+            if (fileListContainer.classList.contains('collapsed')) {
+                toggleTab.style.left = '0'; // 折叠时按钮在屏幕左侧
+            } else {
+                toggleTab.style.left = '33.333%'; // 展开时按钮在侧边栏右侧
+            }
+        }
+
+        // 设置初始状态
+        function initializeSidebar() {
+            if (readmeFile) {
+                // 如果存在 ReadMe 文件，默认折叠侧边栏
+                fileListContainer.classList.add('collapsed');
+                previewArea.classList.remove('with-sidebar');
+                toggleTab.innerHTML = '&gt;';
+            } else {
+                // 如果不存在 ReadMe 文件，默认展开侧边栏
+                fileListContainer.classList.remove('collapsed');
+                previewArea.classList.add('with-sidebar');
+                toggleTab.innerHTML = '&lt;';
+            }
+            updateToggleTabPosition(); // 初始化按钮位置
+        }
+
+        // 折叠/展开逻辑
+        toggleTab.addEventListener('click', () => {
+            if (fileListContainer.classList.contains('collapsed')) {
+                fileListContainer.classList.remove('collapsed');
+                previewArea.classList.add('with-sidebar');
+                toggleTab.innerHTML = '&lt;';
+            } else {
+                fileListContainer.classList.add('collapsed');
+                previewArea.classList.remove('with-sidebar');
+                toggleTab.innerHTML = '&gt;';
+            }
+            updateToggleTabPosition(); // 更新按钮位置
+        });
+
+        // 页面加载时初始化侧边栏状态
+        initializeSidebar();
+
+        // 返回上一级目录逻辑
+        backButton.addEventListener('click', () => {
+            const currentPath = window.location.pathname; // 获取当前路径
+            const parentPath = currentPath.replace(/\/[^\/]*\/?$/, '/'); // 去掉最后一级路径
+            if (parentPath === currentPath) {
+                alert('已经到头了喵! 你返回你妈呢?'); // 如果已经是根目录，弹出提示框
+            } else {
+                window.location.href = parentPath; // 导航到上一层目录
+            }
+        });
+
+        // 自动展示 ReadMe 文件
+        if (readmeFile) {
+            previewFile(readmeFile, false); // 展示 ReadMe 文件时不折叠左侧栏
+        }
+    </script>
+</body>
+
+</html>
