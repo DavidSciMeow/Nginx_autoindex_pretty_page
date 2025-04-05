@@ -1,4 +1,4 @@
-# nginx简易内网管理程序
+# nginx简易网盘管理程序
 
 ```
 server {
