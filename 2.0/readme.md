@@ -1,3 +1,5 @@
+`index.html` 放在你要作为网盘的目录下.
+
 nginx需要安装 nginx-extras
 ```
 sudo apt install nginx-extras
