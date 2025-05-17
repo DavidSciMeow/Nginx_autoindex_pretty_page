@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>WebDAV 文件浏览器</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        body { background: #f7f7fa; }
+        .container-fluid {
+            margin-top: 20px;
+            position: relative;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .file-list {
+            position: absolute;
+            width: 33.333%; max-width: 420px; min-width: 220px;
+            background-color: #f8f9fa;
+            box-shadow: 2px 0 10px 0 #0001;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s cubic-bezier(.55,0,.1,1), opacity 0.25s;
+            left: 0; top: 0; bottom: 0;
+            height: 100%;
+            overflow-y: auto; /* 允许侧栏滚动 */
+        }
+        .file-list.collapsed {
+            transform: translateX(-100%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .sidebar-bookmark {
+            position: fixed;
+            top: 50%;
+            /* left由JS动态设置 */
+            transform: translateY(-50%);
+            width: 40px;
+            height: 60px;
+            background: #e0e7ef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0 20px 20px 0;
+            cursor: pointer;
+            z-index: 1001;
+            box-shadow: 1px 1px 8px #0002;
+            transition: background 0.2s, left 0.3s cubic-bezier(.55,0,.1,1);
+            font-size: 1.8em;
+            color: #5078b3;
+            border: 1.5px solid #e5e7eb;
+            user-select: none;
+        }
+        .sidebar-bookmark:hover {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+        .preview-area {
+            position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+            border-left: 1px solid #ddd; overflow-y: auto;
+            background: #fff;
+            transition: left 0.3s;
+        }
+        .preview-area.with-sidebar { left: 33.333%; }
+        .preview-area.collapsed-sidebar { left: 0; }
+        #previewContainer {
+            width: 100%;
+            height: 100%;
+            min-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            max-width: 90vw;
+            margin: 0 auto;
+        }
+        .folder-link { color: #fa8900; font-weight: bold; cursor: pointer; }
+        .file-link { color: #333; cursor: pointer; }
+        .file-list-header { font-size: 1.2em; margin-bottom: 0.8em; }
+        .file-info-table td { padding: 0.5em 1em; }
+        .markdown-body, pre {
+            max-width: 700px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        .markdown-body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 40vh;
+            text-align: center;
+        }
+        .markdown-body > * { text-align: left; }
+        #previewContainer img, #previewContainer iframe {
+            max-width: 90vw;
+            max-height: 70vh;
+            display: block;
+        }
+        .action-row {
+            display: flex;
+            gap: 0.5em;
+            align-items: center;
+            margin-bottom: 1em;
+        }
+        .upload-btn, .back-btn, .new-folder-btn {
+            padding: 0.4em 1.2em;
+            background: #3498db;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.3em;
+            font-size: 1em;
+        }
+        .upload-btn:hover, .back-btn:hover, .new-folder-btn:hover {
+            background: #217dbb;
+        }
+        .del-btn {
+            color: #e74c3c;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1em;
+            /* 保证图标居右 */
+        }
+        .del-btn:hover { text-decoration: underline; }
+        .list-group {
+            padding-left: 0;
+            margin-bottom: 0;
+        }
+        .list-group-item {
+            display: block;
+            position: relative;
+            padding: 0.5em 1em 0.2em 1em !important;
+            border: none;
+            background: none;
+        }
+        .item-content {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            width: 100%;
+        }
+        .item-main {
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+        .item-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            overflow: hidden;
+        }
+        .item-actions {
+            display: flex;
+            gap: 0.3em;
+            margin-left: auto;
+        }
+        .item-size {
+            font-size: 0.95em;
+            color: #888;
+            margin-top: 1px;
+            margin-bottom: 2px;
+            margin-left: 2em;
+            text-align: left;
+            min-height: 1em;
+        }
+        @media (max-width: 700px) {
+            .file-list {
+                width: 50vw !important;
+                min-width: 0 !important;
+                max-width: none !important;
+            }
+            .preview-area.with-sidebar {
+                left: 50vw !important;
+            }
+            .action-row button span:not(.bi) {
+                display: none !important;
+            }
+            .item-size { margin-left: 1.6em; }
+        }
+        @media (min-width: 701px) {
+            .file-list {
+                width: 33.333% !important;
+                min-width: 220px !important;
+                max-width: 420px !important;
+            }
+            .preview-area.with-sidebar {
+                left: 33.333% !important;
+            }
+            .action-row button span:not(.bi) {
+                display: inline !important;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <!-- 左侧目录 -->
+    <div id="fileListContainer" class="file-list bg-light p-3">
+        <div class="file-list-header d-flex align-items-center justify-content-between">
+            <span>
+                <span class="badge bg-primary">WebDAV</span>
+            </span>
+        </div>
+        <div class="action-row">
+            <button class="back-btn" id="backButton" title="返回上级">
+                <span class="bi bi-arrow-left"></span>
+                <span>返回上级</span>
+            </button>
+            <button class="new-folder-btn" id="addFolderBtn" title="新建文件夹">
+                <span class="bi bi-folder-plus"></span>
+                <span>新建文件夹</span>
+            </button>
+            <button class="upload-btn" id="uploadBtn" title="上传文件">
+                <span class="bi bi-upload"></span>
+                <span>上传</span>
+            </button>
+            <input type="file" id="file" multiple style="display:none;">
+        </div>
+        <ul id="fileList" class="list-group"></ul>
+    </div>
+    <!-- 书签标志，始终悬浮在sidebar右侧 -->
+    <div id="sidebarBookmark" class="sidebar-bookmark">
+        <i class="bi bi-bookmark"></i>
+    </div>
+    <!-- 右侧预览 -->
+    <div id="previewArea" class="preview-area p-3 with-sidebar">
+        <div id="previewContainer">
+            <p>请选择一个文件进行预览喵~</p>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+// 可折叠侧边栏逻辑
+const fileListContainer = document.getElementById('fileListContainer');
+const previewArea = document.getElementById('previewArea');
+const sidebarBookmark = document.getElementById('sidebarBookmark');
+function isSidebarOpen() { return !fileListContainer.classList.contains('collapsed'); }
+function updateSidebarBookmarkPosition() {
+    const sidebar = document.getElementById('fileListContainer');
+    const sidebarBookmark = document.getElementById('sidebarBookmark');
+    if (sidebar.classList.contains('collapsed')) {
+        sidebarBookmark.style.left = '0px';
+    } else {
+        sidebarBookmark.style.left = sidebar.offsetWidth + 'px';
+    }
+}
+function collapseSidebar() {
+    fileListContainer.classList.add('collapsed');
+    previewArea.classList.remove('with-sidebar');
+    previewArea.classList.add('collapsed-sidebar');
+    updateSidebarBookmarkPosition();
+}
+function expandSidebar() {
+    fileListContainer.classList.remove('collapsed');
+    previewArea.classList.add('with-sidebar');
+    previewArea.classList.remove('collapsed-sidebar');
+    updateSidebarBookmarkPosition();
+}
+function toggleSidebar() {
+    if (isSidebarOpen()) {
+        collapseSidebar();
+    } else {
+        expandSidebar();
+    }
+}
+// 默认展开
+window.addEventListener('DOMContentLoaded',()=>{
+    expandSidebar();
+    updateSidebarBookmarkPosition();
+});
+window.addEventListener('resize', updateSidebarBookmarkPosition);
+sidebarBookmark.addEventListener('click', function(e) {
+    toggleSidebar();
+});
+previewArea.addEventListener('click', function(e) {
+    if (isSidebarOpen()) {
+        collapseSidebar();
+    }
+});
+
+const fileList = document.getElementById('fileList');
+const previewContainer = document.getElementById('previewContainer');
+const backButton = document.getElementById('backButton');
+const uploadBtn = document.getElementById('uploadBtn');
+const fileInput = document.getElementById('file');
+const addFolderBtn = document.getElementById('addFolderBtn');
+
+let cwd = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
+
+// --------- WebDAV PROPFIND 拉取目录 ---------
+async function fetchWebDAVDir(path) {
+    let res = await fetch(path, { method: 'PROPFIND', headers: {Depth:1} });
+    let xml = await res.text();
+    let parser = new DOMParser();
+    let doc = parser.parseFromString(xml, 'application/xml');
+    let items = [...doc.getElementsByTagNameNS("DAV:","response")];
+    if (items.length === 0) items = [...doc.getElementsByTagName('response')];
+    let result = [];
+    for (let i = 0; i < items.length; i++) {
+        let hrefElem = items[i].getElementsByTagNameNS("DAV:","href")[0] || items[i].getElementsByTagName('href')[0];
+        let href = decodeURIComponent(hrefElem.textContent);
+        let isRoot = (href === path || href === '/' || href.replace(/\/+$/,"") === path.replace(/\/+$/,""));
+        if (isRoot) continue;
+        let isDir = !!(items[i].getElementsByTagNameNS("DAV:","collection")[0] || items[i].getElementsByTagName('collection')[0]);
+        let name = href.split('/').filter(Boolean).pop() || '';
+        let size = '-';
+        let lastmod = '';
+        if (!isDir) {
+            let sz = items[i].getElementsByTagNameNS("DAV:","getcontentlength")[0] || items[i].getElementsByTagName('getcontentlength')[0];
+            if (sz) size = sz.textContent;
+        }
+        let mod = items[i].getElementsByTagNameNS("DAV:","getlastmodified")[0] || items[i].getElementsByTagName('getlastmodified')[0];
+        if (mod) lastmod = mod.textContent;
+        result.push({ name, href, isDir, size, lastmod });
+    }
+    result.sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.name.localeCompare(b.name, 'zh');
+    });
+    return result;
+}
+
+function getFileType(name) {
+    const ext = name.split('.').pop().toLowerCase();
+    if (name.endsWith('/')) return 'folder';
+    if (['md', 'markdown'].includes(ext)) return 'markdown';
+    if (['pdf'].includes(ext)) return 'pdf';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
+    if (['js', 'html', 'css', 'json', 'py', 'c', 'cpp', 'java', 'go', 'sh', 'ts', 'txt', 'log', 'conf', 'ini'].includes(ext)) return 'text';
+    return 'unknown';
+}
+function formatFileSize(size) {
+    if (!size || size === '-') return '-';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let index = 0, fileSize = parseInt(size, 10);
+    while (fileSize >= 1024 && index < units.length - 1) {
+        fileSize /= 1024; index++;
+    }
+    return `${fileSize.toFixed(2)} ${units[index]}`;
+}
+
+let currentFiles = [];
+let currentReadme = null;
+let currentImages = [];
+async function renderFileList(path) {
+    fileList.innerHTML = '';
+    currentFiles = await fetchWebDAVDir(path);
+    currentFiles = currentFiles.filter(f => f.name.toLowerCase() !== "index.html");
+    currentReadme = currentFiles.find(f => f.name.toLowerCase() === "readme.md");
+    currentImages = currentFiles.filter(f => getFileType(f.name) === "image");
+    currentFiles.forEach(file => {
+        const listItem = document.createElement('li');
+        listItem.className = 'list-group-item';
+
+        let mainContent = '';
+        if (file.isDir) {
+            mainContent = `<span class="folder-link"><i class="bi bi-folder-fill"></i> ${file.name}/</span>`;
+        } else {
+            mainContent = `<span class="file-link"><i class="bi bi-file-earmark"></i> ${file.name}</span>`;
+        }
+        let sizeContent = '';
+        if (!file.isDir && file.size && file.size !== '-') {
+            sizeContent = `<div class="item-size">${formatFileSize(file.size)}</div>`;
+        } else {
+            sizeContent = `<div class="item-size">&nbsp;</div>`;
+        }
+        let actions = `<button class="del-btn" title="删除" onclick="event.stopPropagation();del('${file.name}${file.isDir ? '/' : ''}',${file.isDir})">🗑️</button>`;
+        listItem.innerHTML = `
+            <div class="item-content">
+                <div class="item-main">
+                    <div class="item-label">${mainContent}</div>
+                    <div class="item-actions">${actions}</div>
+                </div>
+                ${sizeContent}
+            </div>
+        `;
+        if (file.isDir) {
+            listItem.ondragover = ev => { ev.preventDefault(); listItem.classList.add('dragover'); };
+            listItem.ondragleave = ev => { listItem.classList.remove('dragover'); };
+            listItem.ondrop = ev => {
+                ev.preventDefault(); listItem.classList.remove('dragover');
+                let items = ev.dataTransfer.items || ev.dataTransfer.files;
+                let files = [];
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].webkitGetAsEntry) {
+                        let entry = items[i].webkitGetAsEntry();
+                        if (entry && entry.isFile) files.push(items[i].getAsFile());
+                    } else {
+                        files.push(items[i].getAsFile ? items[i].getAsFile() : items[i]);
+                    }
+                }
+                uploadFilesTo(file.href, files);
+            };
+            listItem.onclick = () => {
+                cwd = file.href.endsWith('/') ? file.href : file.href + '/';
+                renderFileList(cwd);
+                renderDefaultPreview();
+                previewArea.scrollTop = 0;
+            };
+        } else {
+            listItem.onclick = () => {
+                previewFile(file);
+            };
+        }
+        fileList.appendChild(listItem);
+    });
+    renderDefaultPreview();
+}
+
+function renderDefaultPreview() {
+    previewContainer.innerHTML = '';
+    if (currentReadme) {
+        previewFile(currentReadme, true);
+        return;
+    }
+    if (currentImages.length > 0) {
+        previewFile(currentImages[0], true);
+        return;
+    }
+    previewContainer.innerHTML = `<p>请选择一个文件进行预览喵~</p>`;
+}
+
+function previewFile(file, silent=false) {
+    previewContainer.innerHTML = '';
+    const type = getFileType(file.name);
+    // 不自动折叠侧边栏，只能点击右侧区域触发折叠
+    if (type === 'markdown') {
+        fetch(file.href)
+            .then(r => r.text())
+            .then(content => {
+                const markdownContainer = document.createElement("div");
+                markdownContainer.className = "markdown-body";
+                markdownContainer.innerHTML = marked.parse(content);
+                previewContainer.appendChild(markdownContainer);
+                previewArea.scrollTop = 0;
+            });
+    } else if (type === 'pdf') {
+        const iframe = document.createElement("iframe");
+        iframe.src = file.href;
+        iframe.style.width = "100%";
+        iframe.style.height = "95vh";
+        iframe.style.border = "none";
+        previewContainer.appendChild(iframe);
+    } else if (type === 'image') {
+        const img = document.createElement("img");
+        img.src = file.href;
+        img.title = '点击下载';
+        img.onclick = () => {
+            const a = document.createElement('a');
+            a.href = file.href;
+            a.download = file.name;
+            a.click();
+        };
+        previewContainer.appendChild(img);
+    } else if (type === 'text' || type === 'code') {
+        fetch(file.href)
+            .then(r => r.text())
+            .then(content => {
+                previewContainer.innerHTML = `<pre style="max-width:100%;overflow:auto;">${escapeHTML(content)}</pre>`;
+                const downBtn = document.createElement('a');
+                downBtn.href = file.href;
+                downBtn.download = file.name;
+                downBtn.className = "btn btn-primary mt-3";
+                downBtn.innerText = "下载文件";
+                previewContainer.appendChild(downBtn);
+                previewArea.scrollTop = 0;
+            })
+            .catch(() => {
+                previewContainer.innerHTML = `<h5>无法预览此文件类型喵。</h5><a href="${file.href}" class="btn btn-primary" download>下载文件</a>`;
+            });
+    } else {
+        // 不能预览则不自动收缩
+        previewContainer.innerHTML = `<h5>无法预览此文件类型喵。</h5><a href="${file.href}" class="btn btn-primary" download>下载文件</a>`;
+    }
+}
+function escapeHTML(str) {
+    return str.replace(/[<>&"']/g, c => ({
+        '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'
+    }[c]));
+}
+
+fileListContainer.addEventListener('dragover', ev => {
+    ev.preventDefault();
+    fileListContainer.classList.add('dragover');
+});
+fileListContainer.addEventListener('dragleave', ev => {
+    fileListContainer.classList.remove('dragover');
+});
+fileListContainer.addEventListener('drop', ev => {
+    ev.preventDefault();
+    fileListContainer.classList.remove('dragover');
+    let files = [];
+    if (ev.dataTransfer.items) {
+        for (let i = 0; i < ev.dataTransfer.items.length; i++) {
+            let item = ev.dataTransfer.items[i];
+            if (item.kind === 'file') files.push(item.getAsFile());
+        }
+    } else {
+        files = Array.from(ev.dataTransfer.files);
+    }
+    if (files.length > 0) {
+        uploadFilesTo(cwd, files);
+    }
+});
+
+async function uploadFilesTo(targetPath, files) {
+    if (!files.length) return;
+    for (let f of files) {
+        const fullPath = targetPath + encodeURIComponent(f.name);
+        let res = await fetch(fullPath, { method: 'PUT', body: f });
+        if (!res.ok) {
+            alert("上传失败：" + f.name + " (" + res.status + ")");
+            return;
+        }
+    }
+    await renderFileList(cwd);
+    alert('上传成功喵~');
+}
+
+uploadBtn.onclick = () => {
+    fileInput.value = "";
+    fileInput.click();
+};
+fileInput.onchange = () => {
+    if (fileInput.files.length > 0) {
+        uploadFilesTo(cwd, Array.from(fileInput.files));
+    }
+};
+
+addFolderBtn.onclick = () => {
+    let name = prompt('请输入新文件夹名称喵：');
+    if (!name) return;
+    mkcol(name);
+};
+async function mkcol(name) {
+    name = name.trim();
+    if (!name) {
+        alert('文件夹名不能为空喵~');
+        return;
+    }
+    const fullPath = cwd + encodeURIComponent(name) + '/';
+    let res = await fetch(fullPath, { method: 'MKCOL' });
+    if (!res.ok) {
+        alert("新建文件夹失败：" + res.status);
+        return;
+    }
+    await renderFileList(cwd);
+    alert('新建文件夹成功喵~');
+}
+
+backButton.addEventListener('click', () => {
+    let p = cwd.replace(/\/[^\/]+\/?$/, '/');
+    if (p === cwd || p === '') {
+        alert('已经到头了喵! 你返回你妈呢?');
+    } else {
+        cwd = p;
+        renderFileList(cwd);
+        renderDefaultPreview();
+        previewArea.scrollTop = 0;
+    }
+});
+
+async function del(name, isDir) {
+    if (!confirm(`确定要删除 ${name} 吗？`)) {
+        return;
+    }
+    const fullPath = cwd + encodeURIComponent(name);
+    let res = await fetch(fullPath, { method: 'DELETE' });
+    if (!res.ok) {
+        alert('删除失败 ' + res.status);
+        return;
+    }
+    await renderFileList(cwd);
+    alert('删除成功喵~');
+}
+
+renderFileList(cwd);
+</script>
+</body>
+</html>
