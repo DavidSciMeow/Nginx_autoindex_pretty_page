@@ -13,7 +13,7 @@ load_module modules/ngx_http_dav_ext_module.so;
 ```
 server
 {
-    server_name nasadmin.electronicute.cn;
+    server_name ....;
     listen 80;
     gzip on;
 
